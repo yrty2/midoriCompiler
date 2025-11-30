@@ -1,45 +1,5 @@
 const midori={
-    help(value){
-        if(value==undefined){console.log(
-`midoriは数学言語をjavascriptへコンパイルするライブラリです。
-midori.run(print(i*2i))を打ってみてください。
-midoriはデフォルトで複素数の演算を使用します。
-また、関数や演算子をオーバーロードすることもできます。
-その場合はmidori.settingをいじってください。
-いくつか仕様上の注意点があります。詳細を読む場合はmidori.help(0)を実行してください。
-演算子のリストを見たい場合、midori.help(1)を実行してください。
-より詳しい説明についてはhttps://github.com/yrty2/midoriCompilerを御覧ください。`
-    );}
-        if(value==0){console.log(
-`・変数をmidori内で使用する場合は、midori.run(code)の代わりにmidori.call(code,...variables)あるいはeval(midori.compile(code))を実行してください。(ループ内で使うとき、midori.call()は純粋なjsと同等の速度が出ます)
-・多重階乗は実装されていません。
-・多重冪乗(2^2^2^2など)は計算順序が左から右になります。本来は右から左なのですが、そういうイレギュラーな計算順序は難しいんです。(許して)
-・midoriはある程度曖昧な数式を解釈できます。例えば(1+i)(1-i)という式を(1+i)*(1-i)と解釈して実行します。他にも2xを2*xとして解釈することができるのですが、2xという変数名は使えないのでご注意を。midori.setting.notation="strict"と入力すると、javascriptの数式記法になります(これらの省略ができなくなります)。
-あと、関数と変数の見分けをつけるため、変数名abcのような2文字以上の変数に対しては、abc*(x)=>abc(x)のような省略が不可能です。この文字数はmidori.setting.minMathematicalFuncLengthで変えることができます。
-・微分の対象となる変数はデフォルトでzです。`
-    );}
-        if(value==1){console.log(
-`演算子のリスト
-
-単項演算子
-$->平方根 sqrt
-!->階乗 fact
-~->共役 conjugate
-°->弧度法 angle
-
-二項演算子
-+->加算 sum
--->減算 sub
-*->乗算 mul
-/->除算 quot
-^->冪乗 pow
-%->余り mod
-・->スカラー積 dot
-
-特殊な演算子
-||->絶対値 abs`
-    );}
-    },
+    version:1.0,
     float:{
         minMathematicalFuncLength:2,
         notation:"mathematical",//(x+1)(x-1)のように乗法演算子を省略できます。
@@ -83,14 +43,13 @@ $->平方根 sqrt
                 replace:"Math.floor",
             }
         ],
-        //四則演算+冪+ドット+mod
+        //四則演算+冪+mod
         sum:"(xarg+(yarg))",
         sub:"(xarg-(yarg))",
         mul:"(xarg*(yarg))",
         quot:"(xarg/(yarg))",
         pow:"Math.pow(xarg,yarg)",
         mod:"math.mod(xarg,yarg)",
-        dot:null,
         //単項演算子
         sqrt:"Math.sqrt(xarg)",
         fact:"math.fact(xarg)",
@@ -162,14 +121,13 @@ $->平方根 sqrt
                 replace:"c32.floor",
             }
         ],
-        //四則演算+冪+ドット+mod
+        //四則演算+冪+mod
         sum:"c32.sum(xarg,yarg)",
         sub:"c32.sub(xarg,yarg)",
         mul:"c32.mul(xarg,yarg)",
         quot:"c32.quot(xarg,yarg)",
         pow:"c32.pow(xarg,yarg)",
         mod:"c32.mod(xarg,yarg)",
-        dot:null,
         //単項演算子
         sqrt:"c32.sqrt(xarg)",
         fact:"c32.fact(xarg)",
@@ -181,6 +139,7 @@ $->平方根 sqrt
         lt:"xarg[0]<yarg[0]",
         le:"xarg[0]<=yarg[0]",
         eq:"xarg[0]==yarg[0]",
+        dot:"c32v.dot(xarg,yarg)",
     },
     quaternion:{
         minMathematicalFuncLength:2,
@@ -1195,24 +1154,42 @@ const c32={
         return this.const(r*Math.cos(z[1]),r*Math.sin(z[1]));
     },
     mul(z,w){
-        const c=new Float32Array(2);
-        c[0]=z[0]*w[0]-z[1]*w[1];
-        c[1]=z[0]*w[1]+z[1]*w[0];
-        return c;
+        if(!Array.isArray(z) && !Array.isArray(w)){
+            const c=new Float32Array(2);
+            c[0]=z[0]*w[0]-z[1]*w[1];
+            c[1]=z[0]*w[1]+z[1]*w[0];
+            return c;
+        }
+        if(!Array.isArray(z) && Array.isArray(w)){
+            return c32v.mul(w,z);
+        }
+        if(Array.isArray(z) && !Array.isArray(w)){
+            return c32v.mul(z,w);
+        }
+        return c32v.cross(z,w);
     },
     sum(z,w){
+        if(Array.isArray(z)){
+            return c32v.sum(z,w);
+        }
         const c=new Float32Array(2);
         c[0]=z[0]+w[0];
         c[1]=z[1]+w[1];
         return c;
     },
     sub(z,w){
+        if(Array.isArray(z)){
+            return c32v.sub(z,w);
+        }
         const c=new Float32Array(2);
         c[0]=z[0]-w[0];
         c[1]=z[1]-w[1];
         return c;
     },
     abs(z){
+        if(Array.isArray(z)){
+            return c32v.length(z);
+        }
         const c=new Float32Array(2);
         c[0]=Math.sqrt(z[0]*z[0]+z[1]*z[1]);
         return c;
@@ -1451,5 +1428,50 @@ const q32={
         }
         const abu=Math.sqrt(u[1]*u[1]+u[2]*u[2]+u[3]*u[3]);
         return q32.const(0,u[1]/abu,u[2]/abu,u[3]/abu);
+    }
+}
+const c32v={
+    //複素内積空間
+    //Array[Float32Array,...]
+    sum(u,v){
+        const res=[];
+        for(let k=0; k<u.length; ++k){
+            res[k]=c32.sum(u[k],v[k]);
+        }
+        return res;
+    },
+    sub(u,v){
+        const res=[];
+        for(let k=0; k<u.length; ++k){
+            res[k]=c32.sub(u[k],v[k]);
+        }
+        return res;
+    },
+    dot(u,v){
+        let res=c32.const(0,0);
+        for(let k=0; k<u.length; ++k){
+            res=c32.sum(res,c32.mul(u[k],c32.conjugate(v[k])));
+        }
+        return res;
+    },
+    mul(u,scalar){
+        let res=[];
+        for(let k=0; k<u.length; ++k){
+            res[k]=c32.mul(u[k],scalar);
+        }
+        return res;
+    },
+    length(u){
+        return c32.sqrt(this.dot(u,u));
+    },
+    cross(u,v){
+        //ベクトル積は3次元にしか存在しない
+        const res=[];
+        if(u.length==3){
+            res[0]=c32.sub(c32.mul(u[1],v[2]),c32.mul(u[2],v[1]));
+            res[1]=c32.sub(c32.mul(u[2],v[0]),c32.mul(u[0],v[2]));
+            res[2]=c32.sub(c32.mul(u[0],v[1]),c32.mul(u[1],v[0]));
+        }
+        return res;
     }
 }
