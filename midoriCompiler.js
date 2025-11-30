@@ -361,6 +361,9 @@ $->平方根 sqrt
             if(inabs && word=="|"){
                 startpoint=true;
             }
+            if(word==":"){
+                startpoint=true;
+            }
         }
         cut();
         if(midori.setting.notation=="mathematical"){
@@ -408,10 +411,12 @@ $->平方根 sqrt
         }
         function parseExpression(){
             if(!midori.errored){
-            let node=parseTerm();
+                let In;
             if(peek()=="|"){
-                node.in="|";
+                In="|";
             }
+            let node=parseTerm();
+                node.in=In;
             while(peek()==="+" || peek()==="-"){
                 //+か-であるなら。
                 const operator=consume();
@@ -541,7 +546,7 @@ $->平方根 sqrt
             //絶対値記号
             if(t==="|"){
                 consume();
-                const node = parseExpression();
+                const node = parseExpression(t);
                 expect("|");
                 return findRightUnary(node);
             }
@@ -739,6 +744,236 @@ $->平方根 sqrt
         return this.compileAsFunction(code)(environment);
     },
     errored:false,
+    wasmStack:[],
+    wasmer(midoricode){
+        function ieee754(value){
+            if(value==0){
+                return [0x00,0x00,0x00,0x00];
+            }
+            let bit=[];
+            let bytes=[];
+            let ex=127;
+            bit.push((-Math.sign(value)+1)/2);
+            value=Math.abs(value);
+            while(value>=2){
+                value*=1/2;
+                ex++;
+            }
+            while(1>value){
+                value*=2;
+                ex--;
+            }
+            let binary=value.toString(2).slice(2);
+            let exp=ex.toString(2);
+            let K=0;
+            for(let k=0; k<8; ++k){
+                if(exp.length>=8-k){
+                    bit.push(exp[K]);
+                    K++;
+                }else{
+                    bit.push("0");
+                }
+            }
+            for(let k=0; k<23; ++k){
+                if(binary.length>k){
+                    bit.push(binary[k]);
+                }else{
+                    bit.push("0");
+                }
+            }
+            for(let k=3; k>=0; --k){
+                bytes.push(parseInt(bit[8*k]+bit[8*k+1]+bit[8*k+2]+bit[8*k+3]+bit[8*k+4]+bit[8*k+5]+bit[8*k+6]+bit[8*k+7],2));
+            }
+            return bytes;
+        }
+        function UTFer(string){
+            return new TextEncoder().encode(string);
+        }
+        const variable=[];
+        const ast=midori.parsedmidori(midoricode);
+        const f32={
+            const:0x43,
+            add:0x92,
+            sub:0x93,
+            mul:0x94,
+            div:0x95,
+            floor:0x8e,
+            abs:0x8b,
+            sqrt:0x91,
+            lt:0x5d,
+            le:0x5f,
+            gt:0x5e,
+            ge:0x60,
+            eq:0x5b,
+            ne:0x5c
+        }
+        const i32={
+            const:0x41
+        }
+        const local={
+            get:0x20,
+            set:0x21,
+            f32:0,
+            i32:0
+        }
+        const op={
+            f32:0x7d,
+            end:0x0b,
+            else:0x05,
+            if:0x04,
+            block:0x02,
+            br_if:0x0d,
+            br:0x0c,
+            void:0x40,
+            loop:0x03
+        }
+        console.log(ast);
+        function parseAST(kst){
+            let tape=[];
+            if(kst.type=="Literal"){
+                tape.push(f32.const,...ieee754(kst.value));
+            }
+            if(kst.type=="Identifier"){
+                //local.get
+                if(kst.name=="otherwise" || kst.name=="true"){
+                    tape.push(i32.const,1);
+                }else{
+                    const id=variable.indexOf(kst.name);
+                    if(id==-1){
+                        tape.push(local.get,variable.length);
+                        variable.push(kst.name);
+                    }else{
+                        tape.push(local.get,id);
+                    }
+                }
+            }
+            if(kst.type=="BinaryExpression"){
+                if(kst.operator=="+"){
+                tape.push(...parseAST(kst.left),...parseAST(kst.right),f32.add);
+                }
+                if(kst.operator=="-"){
+                tape.push(...parseAST(kst.left),...parseAST(kst.right),f32.sub);
+                }
+                if(kst.operator=="*"){
+                tape.push(...parseAST(kst.left),...parseAST(kst.right),f32.mul);
+                }
+                if(kst.operator=="/"){
+                tape.push(...parseAST(kst.left),...parseAST(kst.right),f32.div);
+                }
+                if(kst.operator=="^"){
+                    tape.push(...parseAST(kst.left));
+                    //指数が数式でない整数であるとする
+                    //この方法は後に変える。(wasmが長すぎてしまう可能性があるため)
+                    for(let k=0; k<kst.right.value; ++k){
+                    tape.push(...parseAST(kst.left),f32.mul);
+                    }
+                }
+                if(kst.operator=="%"){
+                    tape.push(...parseAST(kst.left));
+                    tape.push(...parseAST(kst.right));
+                    tape.push(...parseAST(kst.left));
+                    tape.push(...parseAST(kst.right));
+                    tape.push(f32.div,f32.floor,f32.mul,f32.sub);
+                }
+                //条件
+                if(kst.operator=="=" || kst.operator=="=="){
+                    tape.push(...parseAST(kst.left),...parseAST(kst.right),f32.eq);
+                }
+                if(kst.operator=="<"){
+                    tape.push(...parseAST(kst.left),...parseAST(kst.right),f32.lt);
+                }
+                if(kst.operator=="<="){
+                    tape.push(...parseAST(kst.left),...parseAST(kst.right),f32.le);
+                }
+                if(kst.operator==">"){
+                    tape.push(...parseAST(kst.left),...parseAST(kst.right),f32.gt);
+                }
+                if(kst.operator==">="){
+                    tape.push(...parseAST(kst.left),...parseAST(kst.right),f32.ge);
+                }
+                if(kst.in=="|"){
+                    tape.push(f32.abs);
+                }
+            }
+            if(kst.type=="UnaryExpression"){
+                if(kst.operator=="$"){
+                tape.push(...parseAST(kst.value),f32.sqrt);
+                }
+                if(kst.operator=="!"){
+                    //整数階乗
+                    local.f32++;//localf32追加
+                    const time=`lv:${local.i32+local.f32}`;
+                    local.f32++;//localf32追加
+                    const value=`lv:${local.i32+local.f32}`;
+                    tape.push(f32.const,...ieee754(1));
+                    tape.push(local.set,value);
+                    tape.push(...parseAST(kst.value));
+                    tape.push(local.set,time);
+                    tape.push(op.block,op.void,op.loop,op.void);
+                    //脱出条件
+                    tape.push(local.get,time,f32.const,...ieee754(0),f32.eq,op.br_if,1);
+                    tape.push(local.get,time,local.get,value,f32.mul,local.set,value);
+                    tape.push(local.get,time,f32.const,...ieee754(1),f32.sub,local.set,time);
+                    tape.push(op.br,0,op.end,op.end,local.get,value);
+                }
+                if(kst.operator=="~"){
+                }
+                if(kst.operator=="°"){
+                }
+                if(kst.in=="|"){
+                    tape.push(f32.abs);
+                }
+            }
+            if(kst.type=="PiecewiseExpression"){
+                function parseConditions(k){
+                    tape.push(...parseAST(kst.tree[k].conditions),op.if,op.f32);
+                    tape.push(...parseAST(kst.tree[k].res),op.else);
+                    if(k+1==kst.tree.length){
+                    tape.push(f32.const,...ieee754(0));//でなければ
+                    }else{
+                        parseConditions(k+1);
+                    }
+                    tape.push(op.end);
+                }
+                parseConditions(0);
+            }
+            return tape;
+        }
+        if(ast!="errorDetected"){
+        let code=[];
+        code.push(...parseAST(ast));
+        for(let k=0; k<code.length; ++k){
+            if(isNaN(code[k])){
+            if(code[k].indexOf("lv:")!=-1){
+                code[k]=parseInt(code[k].slice(3))+variable.length-1;
+            }
+            }
+        }
+    const compiled=new WebAssembly.Instance(new WebAssembly.Module(Uint8Array.from([
+        ...[0x00, 0x61, 0x73, 0x6d],
+        ...[0x01, 0x00, 0x00, 0x00],
+        //sections
+        ...[0x01,0x05+variable.length,0x01],//type
+        ...[0x60,variable.length,...variable.fill(0x7d),0x01,0x7d],//引数とか
+        ...[0x03,0x02,0x01,0x00],//Function
+        ...[0x07,0x07,0x01,0x03,114,101,115,0x00,0x00],//exports
+        ...[0x0a,code.length+6,0x01],//code
+        ...[code.length+4,0x01,local.f32,0x7d],//func [btl,local declear count,...types]
+        ...code,
+        ...[0x0b]
+    ]))).exports.res;
+            midori.wasmStack.push({code:midoricode,output:compiled,input:[]});
+            return compiled;
+        }
+        return "console.error('コンパイルに失敗:'+code)";
+    },
+    callf(code,...variable){
+        const id=midori.wasmStack.findIndex(e=>e.code==code);
+        if(id==-1){
+        return midori.wasmer(code)(...variable);
+        }
+        return midori.wasmStack[id].output(...variable);
+    },
     f2tcompiler:{
         keyword:["\frac","\sqrt","\pm"],
         tokenizer(tex){
