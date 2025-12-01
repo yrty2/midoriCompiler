@@ -121,16 +121,18 @@ const midori={
                 replace:"c32.floor",
             }
         ],
-        //四則演算+冪+mod
+        //二項演算
         sum:"c32.sum(xarg,yarg)",
         sub:"c32.sub(xarg,yarg)",
         mul:"c32.mul(xarg,yarg)",
         quot:"c32.quot(xarg,yarg)",
         pow:"c32.pow(xarg,yarg)",
         mod:"c32.mod(xarg,yarg)",
+        tet:"c32.tetration(xarg,yarg)",
         //単項演算子
         sqrt:"c32.sqrt(xarg)",
         fact:"c32.fact(xarg)",
+        factn:"c32.factn(factamount,xarg)",
         conjugate:"c32.conjugate(xarg)",
         angle:null,
         //条件
@@ -262,7 +264,7 @@ const midori={
         var reading=0;
         const functions=["exp"];
         const operators=["+","-","*","/","^","!","~","%","=","・","°",",","$","'",":",">","<"];
-        const uoperator=["~","!","°","$"];
+        const uoperator=["~","°","$"];
         //課題：冪演算が乗算と同じ優先度になっている。
         //優先度　階乗>>冪乗>>乗算>>加算>>符号
         var startpoint=true;
@@ -311,10 +313,15 @@ const midori={
                 cut();
                 if(k+1<code.length && In(code[k+1],operators)){
                     let op=word;
-                    let uop=In(word,uoperator);//uopなら重ならない。例えば2!!
+                    let uop=In(word,uoperator);
+                    let fact=word=="!";//uopなら階乗でない限り重ならない。例えば2!!
                     while(!uop && k+1<code.length && In(code[k+1],operators)){
+                        if(!fact || code[k+1]=="!"){
                     k++;
                     op+=code[k];
+                        }else{
+                            break;
+                        }
                     }
                     add(op);
                 }else{
@@ -413,7 +420,7 @@ const midori={
         }
         function parseDeepTerm(){
             let node=parsePrimary();
-            while(peek()==="^" || peek()==="%" || peek()===">" || peek()==="<" || peek()==="=" || peek()==="==" || peek()==="<=" || peek()===">=" || peek()==="=/"){
+            while(peek()==="^" || peek()==="^^" || peek()==="**" || peek()==="****" || peek()==="%" || peek()===">" || peek()==="<" || peek()==="=" || peek()==="==" || peek()==="<=" || peek()===">=" || peek()==="=/"){
                 let operator=consume();
                 const right=parsePrimary();
                 node={type:"BinaryExpression",operator:operator,left:node,right};
@@ -425,6 +432,11 @@ const midori={
                 var operator=peek();
                 consume();
                 return {type:"UnaryExpression",operator:operator,value:value};
+            }
+            if(peek() && peek().indexOf("!!")!=-1){
+                let am=peek().length;
+                consume();
+                return {type:"UnaryExpression",operator:"multiFactorial",amount:am,value:value};
             }
             return value;
         }
@@ -586,8 +598,11 @@ const midori={
                 if(kst.operator=="/"){
                 tape+=midori.setting.quot.replace("xarg",`${parseAST(kst.left)}`).replace("yarg",`${parseAST(kst.right)}`);
                 }
-                if(kst.operator=="^"){
+                if(kst.operator=="**" || kst.operator=="^"){
                 tape+=midori.setting.pow.replace("xarg",`${parseAST(kst.left)}`).replace("yarg",`${parseAST(kst.right)}`);
+                }
+                if(kst.operator=="****" || kst.operator=="^^"){
+                tape+=midori.setting.tet.replace("xarg",`${parseAST(kst.left)}`).replace("yarg",`${parseAST(kst.right)}`);
                 }
                 if(kst.operator=="%"){
                 tape+=midori.setting.mod.replace("xarg",`${parseAST(kst.left)}`).replace("yarg",`${parseAST(kst.right)}`);
@@ -627,6 +642,9 @@ const midori={
                 }
                 if(kst.operator=="!"){
                 tape+=midori.setting.fact.replace("xarg",`${parseAST(kst.value)}`);
+                }
+                if(kst.operator=="multiFactorial"){
+                tape+=midori.setting.factn.replace("xarg",`${parseAST(kst.value)}`).replace("factamount",kst.amount);
                 }
                 if(kst.operator=="~"){
                 tape+=midori.setting.conjugate.replace("xarg",`${parseAST(kst.value)}`);
@@ -1271,6 +1289,26 @@ const c32={
         }
         }
     },
+    factn(n,x){
+        if(x[1]!=0 || x[0]%1!=0){
+            console.error("多重階乗は複素数または実数に拡張されていません！");
+            return;
+        }
+        let res=1;
+        if(x[0]<0){
+            if((-x[0])%n==0){
+                /*(x+2)!!/(x+2)=x!! (-N*n)!^n=NaN*/
+                return c32.const(NaN,NaN);
+            }else{
+                return c32.prod(c32.factn(n,c32.const(x[0]+n,0)),1/(x[0]+n));
+            }
+        }else{
+        for(let k=x[0]; k>0; k-=n){
+            res*=k;
+        }
+        return c32.const(res,0);
+        }
+    },
     print(z){
         let operator="+";
         let x=Math.round(z[0]*1000)/1000;
@@ -1339,6 +1377,17 @@ const c32={
         const r=Math.pow(z[0]*z[0]+z[1]*z[1],0.25);
         const theta=Math.atan2(z[1],z[0])/2;
         return c32.const(r*Math.cos(theta),r*Math.sin(theta));
+    },
+    tetration(z,w){
+        //wは整数である必要がある。
+        if(w[0]==-1){
+            return new Float32Array(2);
+        }
+        let res=c32.const(1,0);
+        for(let k=1; k<=w[0]; ++k){
+            res=c32.pow(z,res);
+        }
+        return res;
     },
     int(f,C){
         //不定積分しないよ。
