@@ -139,6 +139,7 @@ const midori={
         lt:"xarg[0]<yarg[0]",
         le:"xarg[0]<=yarg[0]",
         eq:"xarg[0]==yarg[0]",
+        ne:"xarg[0]!=yarg[0]",
         dot:"c32v.dot(xarg,yarg)",
     },
     quaternion:{
@@ -261,6 +262,7 @@ const midori={
         var reading=0;
         const functions=["exp"];
         const operators=["+","-","*","/","^","!","~","%","=","・","°",",","$","'",":",">","<"];
+        const uoperator=["~","!","°","$"];
         //課題：冪演算が乗算と同じ優先度になっている。
         //優先度　階乗>>冪乗>>乗算>>加算>>符号
         var startpoint=true;
@@ -307,7 +309,17 @@ const midori={
                     safe=false;
                 }else{
                 cut();
-                add(word);//二項演算子であった。
+                if(k+1<code.length && In(code[k+1],operators)){
+                    let op=word;
+                    let uop=In(word,uoperator);//uopなら重ならない。例えば2!!
+                    while(!uop && k+1<code.length && In(code[k+1],operators)){
+                    k++;
+                    op+=code[k];
+                    }
+                    add(op);
+                }else{
+                    add(word);
+                }
                 safe=false;
                 }
             }
@@ -401,11 +413,8 @@ const midori={
         }
         function parseDeepTerm(){
             let node=parsePrimary();
-            while(peek()==="^" || peek()==="%" || peek()===">" || peek()==="<" || peek()==="="){
+            while(peek()==="^" || peek()==="%" || peek()===">" || peek()==="<" || peek()==="=" || peek()==="==" || peek()==="<=" || peek()===">=" || peek()==="=/"){
                 let operator=consume();
-                if(peek()=="="){
-                    operator+=consume();
-                }
                 const right=parsePrimary();
                 node={type:"BinaryExpression",operator:operator,left:node,right};
             }
@@ -602,6 +611,9 @@ const midori={
                 if(kst.operator==">="){
                 tape+=midori.setting.ge.replace("xarg",`${parseAST(kst.left)}`).replace("yarg",`${parseAST(kst.right)}`);
                 }
+                if(kst.operator=="=/"){
+                tape+=midori.setting.ne.replace("xarg",`${parseAST(kst.left)}`).replace("yarg",`${parseAST(kst.right)}`);
+                }
                 if(kst.in=="|"){
                     tape+=")";
                 }
@@ -652,7 +664,6 @@ const midori={
             }
             if(kst.type=="PiecewiseExpression"){
                 let parsedTree="";
-                console.log(kst.tree);
                 for(let k=0; k<kst.tree.length; ++k){
                     parsedTree+=`{condition:${parseAST(kst.tree[k].conditions)},res:${parseAST(kst.tree[k].res)}}`;
                     if(k+1<kst.tree.length){
@@ -680,8 +691,7 @@ const midori={
         if(id==-1){
             const JSmidori=this.scripten(this.parser(this.tokenizer(code)));
             this.midoriStock.push({import:code,export:JSmidori,environment:midori.setting});
-            console.log(JSmidori(c32.const(2,0)));
-            return JSmidori.export;
+            return JSmidori;
         }else{
             return this.midoriStock[id].export;
         }
@@ -1380,7 +1390,10 @@ const q32={
         }
     },
     conjugate(u){
+        if(isNaN(u)){
         return q32.const(u[0],-u[1],-u[2],-u[3]);
+        }
+        return !u;
     },
     pow(u,v){
         if(v[1]==0 && v[2]==0 && v[3]==0){
