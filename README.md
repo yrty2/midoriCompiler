@@ -12,5 +12,3 @@ midori.run("1+1")とコンソール上で入力して実行してみてくださ
 
 # インストール
 midoriCompiler.jsをダウンロード(あるいはコピペ)して、htmlに<script src="midoriCompiler.js"></script>とタグを追加するだけです。
-
-CDNを検討中
